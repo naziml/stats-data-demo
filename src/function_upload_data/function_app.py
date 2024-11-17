@@ -1,25 +1,41 @@
-import os
-import json
-import logging
-import io
-import pandas as pd
-from azure.identity import DefaultAzureCredential, ManagedIdentityCredential
-from datetime import datetime, timedelta, timezone
 import azure.functions as func
-from azure.storage.blob.aio import BlobServiceClient
-from azure.servicebus.aio import ServiceBusClient
-from azure.servicebus import ServiceBusMessage
+import logging
+from azure.eventhub import EventHubProducerClient, EventData
+from azure.storage.blob import BlobServiceClient, BlobSasPermissions, generate_blob_sas
+import os
+import base64
+import json
+from datetime import datetime, timedelta, timezone
+import pandas as pd
+import time
+import io
+
+# inference
+#import aiohttp
+import asyncio
+import json
+import os
+import logging
+
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
-STORAGE_CONTAINER_CSV = os.getenv("STORAGE_CONTAINER_CSV")
-SINGLE_LINE_SERVICEBUS_QUEUE_NAME = os.getenv("SINGLE_LINE_SERVICEBUS_QUEUE_NAME")
-FULL_FILE_SERVICEBUS_QUEUE_NAME = os.getenv("FULL_FILE_SERVICEBUS_QUEUE_NAME")
-default_credential = DefaultAzureCredential(managed_identity_client_id=os.getenv('AZURE_CLIENT_ID'))
 
-# accept a file, store it in blob storage, and send a message to service bus about the file with extra metadata and context
+EVENTHUB_CONNECTION_STR = os.getenv("EVENTHUB_CONNECTION_STR")
+EVENTHUB_NAME = os.getenv("EVENTHUB_NAME_INGEST")
+BATCH_SIZE = 1000
+PRODUCER = EventHubProducerClient.from_connection_string(EVENTHUB_CONNECTION_STR, eventhub_name=EVENTHUB_NAME)
+STORAGE_CONNECTION_STR = os.getenv("AzureWebJobsStorage")
+STORAGE_CONTAINER_CSV = os.getenv("STORAGE_CONTAINER_CSV")
+
+
+# accept a file and store it in either eventhub or storage
 @app.function_name(name="upload_data")
-@app.route(route="upload_data", methods=[func.HttpMethod.POST])
-async def upload_data(req: func.HttpRequest) -> func.HttpResponse:
+@app.route(route="upload_data", methods=["POST"])
+@app.event_hub_output(arg_name="outevent", 
+                      event_hub_name=EVENTHUB_NAME, 
+                      connection="EVENTHUB_CONNECTION_STR")
+
+def upload_data(req: func.HttpRequest, outevent: func.Out[str]) -> func.HttpResponse:
     try:
         # Extract input data from the request
         file_data = req.files.get('file_data')
@@ -34,9 +50,11 @@ async def upload_data(req: func.HttpRequest) -> func.HttpResponse:
         binary_filedata = file_data.read()
         csv_data = io.BytesIO(binary_filedata)
         csv_df = pd.read_csv(csv_data, nrows=2)
+        #logging.info("csv_df: ", csv_df.info())
         header = [h.lower() for h in csv_df.columns.tolist()]
+        messages = []
 
-        file_url = await _upload_to_blob(binary_filedata, file_name)
+        file_url = _upload_to_blob(binary_filedata, file_name)
 
         message = {
             "file_name": file_name,
@@ -47,52 +65,31 @@ async def upload_data(req: func.HttpRequest) -> func.HttpResponse:
             "file_url": file_url
         }
         message_str = json.dumps(message)
-        await _send_to_servicebus(message_str, FULL_FILE_SERVICEBUS_QUEUE_NAME)
+        outevent.set(message_str)
 
         return func.HttpResponse(f"File {file_name} processed and added to the queue.\n", status_code=200)
 
     except Exception as e:
         logging.error(f"Error processing request: {e}")
         return func.HttpResponse("Error processing request.\n", status_code=500)
+    
 
-# accept a file with just header and first line and send a message to service bus about the file with extra metadata, context, and content 
-@app.function_name(name="upload_data_single")
-@app.route(route="upload_data_single", methods=[func.HttpMethod.POST])
-async def upload_data_single(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        # Extract input data from the request
-        logging.info(f"Executing upload_data_single.")
-
-        message_str = req.get_body().decode('utf-8')
-        await _send_to_servicebus(message_str, SINGLE_LINE_SERVICEBUS_QUEUE_NAME)
-
-        return func.HttpResponse(f"upload_data_single processed and added to the queue.\n", status_code=200)
-
-    except Exception as e:
-        logging.error(f"Error processing request: {e}")
-        return func.HttpResponse("Error processing request.\n", status_code=500)
-
-async def _upload_to_blob(file_data, file_name):
-    account_url = f"https://{os.getenv('AzureWebJobsStorage__accountName')}.blob.core.windows.net"
-    blob_service_client = BlobServiceClient(account_url, credential=default_credential)
+# TODO make this async
+def _upload_to_blob(file_data, file_name):
+    blob_service_client = BlobServiceClient.from_connection_string(STORAGE_CONNECTION_STR)
     container_client = blob_service_client.get_container_client(STORAGE_CONTAINER_CSV)
     try:
         blob_client = container_client.get_blob_client(file_name)
-        await blob_client.upload_blob(file_data, overwrite=True)
-        return blob_client.url
+        blob_client.upload_blob(file_data, overwrite=True)
+        sas_token = generate_blob_sas(
+            account_name=blob_service_client.account_name,
+            container_name=STORAGE_CONTAINER_CSV,
+            blob_name=file_name,
+            account_key=blob_service_client.credential.account_key,
+            permission=BlobSasPermissions(read=True),
+            expiry=datetime.now(timezone.utc) + timedelta(hours=12)  # SAS token valid for 1 hour
+        )
+        return blob_client.url + "?" + sas_token
     except Exception as e:
         logging.error(f"Error uploading file {file_name} to Azure Blob Storage: {e}")
-        raise
-
-async def _send_to_servicebus(message, queue_name):
-    servicebus_fqdn = os.getenv('SERVICEBUS_CONNECTION__fullyQualifiedNamespace')
-    servicebus_client = ServiceBusClient(servicebus_fqdn, credential=default_credential)
-    try:
-        async with servicebus_client:
-            sender = servicebus_client.get_queue_sender(queue_name=queue_name)
-            async with sender:
-                message = ServiceBusMessage(message)
-                await sender.send_messages(message)
-    except Exception as e:
-        logging.error(f"Error sending service bus message to Azure Service Bus: {e}")
         raise
