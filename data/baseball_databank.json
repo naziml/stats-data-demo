@@ -1,0 +1,20 @@
+[
+    {
+        "file_name": "Master.csv",
+        "file_data_url": "https://raw.githubusercontent.com/Azure-Samples/stats-data-demo/refs/heads/main/data/baseball_databank/Master.csv",
+        "table": "master_csv",
+        "file_description": "Player names, DOB, and biographical information. With the following fields/columns: playerid = player_id, birthyear = birth_year, birthmonth = birth_month, birthday = birth_day, birthcountry = birth_country, birthstate = birth_state, birthcity = birth_city, deathyear = death_year, deathmonth = death_month, deathday = death_day, deathcountry = death_country, deathstate = death_state, deathcity = death_city, namefirst = first_name, namelast = last_name, namegiven = given_name, weight = weight, height = height, bats = bats, throws = throws, debut = debut, finalgame = final_game, retroid = retro_id, bbrefid = bbref_id"
+    },
+    {
+        "file_name": "Batting.csv",
+        "file_data_url": "https://raw.githubusercontent.com/Azure-Samples/stats-data-demo/refs/heads/main/data/baseball_databank/Batting.csv",
+        "table": "batting_csv",
+        "file_description": "Batting statistics. With the following fields/columns: playerid = player_id, yearid = year_id, stint = stint, teamid = team_id, lgid = league_id, g = games, ab = at_bats, r = runs, h = hits, 2b = doubles, 3b = triples, hr = home_runs, rbi = runs_batted_in, sb = stolen_bases, cs = caught_stealing, bb = walks, so = strikeouts, ibb = intentional_walks, hbp = hit_by_pitch, sh = sacrifice_hits, sf = sacrifice_flies, gidp = grounded_into_double_play"
+    },
+    {
+        "file_name": "Fielding.csv",
+        "file_data_url": "https://raw.githubusercontent.com/Azure-Samples/stats-data-demo/refs/heads/main/data/baseball_databank/Fielding.csv",
+        "table": "fielding_csv",
+        "file_description": "Fielding statistics. With the following fields/columns: playerid = player_id, yearid = year_id, stint = stint, teamid = team_id, lgid = league_id, pos = position, g = games, gs = games_started, innouts = innings_outs, po = putouts, a = assists, e = errors, dp = double_plays, pb = passed_balls, wp = wild_pitches, sb = stolen_bases_allowed, cs = caught_stealing_allowed, zr = zone_rating"
+    }
+]
