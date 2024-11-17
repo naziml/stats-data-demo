@@ -121,10 +121,11 @@ It is supplemented by these tables:
 
 ## Main Table Details
 
-### master_csv
 
-description: Player names, DOB, and biographical information
-columns: 
+file_name: Master.csv
+file_data_url: https://raw.githubusercontent.com/Azure-Samples/stats-data-demo/refs/heads/main/data/baseball_databank/Master.csv
+table: master_csv
+file_description: Player names, DOB, and biographical information. With the following fields/columns\n
   playerid = player_id
   birthyear = birth_year
   birthmonth = birth_month
@@ -151,10 +152,10 @@ columns:
   bbrefid = bbref_id
 
 
-### batting_csv
-
-description: Batting statistics
-columns: 
+file_name: Batting.csv
+file_data_url: https://raw.githubusercontent.com/Azure-Samples/stats-data-demo/refs/heads/main/data/baseball_databank/Batting.csv
+table: batting_csv
+file_description: Batting statistics. With the following fields/columns\n
   playerid = player_id
   yearid = year_id
   stint = stint
@@ -179,10 +180,10 @@ columns:
   gidp = grounded_into_double_play
 
 
-### fielding_csv
-
-description: Fielding statistics
-columns: 
+file_name: Fielding.csv
+file_data_url: https://raw.githubusercontent.com/Azure-Samples/stats-data-demo/refs/heads/main/data/baseball_databank/Fielding.csv
+table: fielding_csv
+file_description: Fielding statistics. With the following fields/columns\n
   playerid = player_id
   yearid = year_id
   stint = stint

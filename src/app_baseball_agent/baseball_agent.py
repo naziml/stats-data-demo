@@ -35,9 +35,14 @@ load_dotenv(dotenv_path='.env.dev')
 
 # we absolutely need these settings
 OPENAI_ENDPOINT = os.getenv("OPENAI_ENDPOINT")
-DATABASE_ENDPOINT = os.getenv("DATABASE_ENDPOINT")
-OLLAMA_ENDPOINT = os.getenv("OLLAMA_ENDPOINT")
 logging.info(f"OPENAI_ENDPOINT: {OPENAI_ENDPOINT}")
+
+DATABASE_ENDPOINT = os.getenv("DATABASE_ENDPOINT")
+
+OLLAMA_ENDPOINT = os.getenv("OLLAMA_ENDPOINT", None)
+logging.info(f"OLLAMA_ENDPOINT: {OLLAMA_ENDPOINT}")
+if not OLLAMA_ENDPOINT:
+    logging.error("No OLLAMA_ENDPOINT found!")
 
 SESSIONS_ENDPOINT = os.getenv("SESSIONS_ENDPOINT")
 
@@ -57,12 +62,7 @@ OPENAI_API_VERSION = os.getenv("OPENAI_API_VERSION", "2024-08-01-preview")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
 EMBEDDING_API_VERSION = os.getenv("EMBEDDING_API_VERSION", "2023-05-15")
 
-
-
-
-app = FastAPI()
-
-
+# enable keys when we're ready
 security = HTTPBearer()
 TOKEN = "841e085171c01d5591602e6aff1701d8"
 
@@ -78,9 +78,33 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 """
 
 
+# start the app
+app = FastAPI()
+
+
+# start the server first before we do anything else
+@app.on_event("startup")
+async def init():
+    logging.info("Initializing...")
+    try:
+        await asyncio.create_task(_init())
+    except Exception as e:
+        logging.error(f"Initialization failed: {e}")
+
+async def _init():
+    await asyncio.sleep(10)
+    logging.critical("================= Starting initialization...")
+    await _assemble_query_engine_seed()
+    await _prep_models()
+    await _setup_query_engine()
+    await _setup_tools_and_agent()
+    await _setup_code_interpreter_agent()
+    logging.critical("================= Initialization complete!")
+
+
 
 # retrieve the schema and sample data from the database
-@app.on_event("startup")
+#@app.on_event("startup")
 async def _assemble_query_engine_seed():
     # Connect to the database
     conn = await asyncpg.connect(DATABASE_ENDPOINT)
@@ -117,7 +141,7 @@ async def _assemble_query_engine_seed():
 
 # connect to ollama and see
 # if we have ollama models available
-@app.on_event("startup")
+#@app.on_event("startup")
 async def _prep_models():
     llm_models = [
         LLM_MODEL_PRIMARY,
@@ -229,7 +253,7 @@ async def check_connection(engine):
 
 
 # setup the query engine against our database
-@app.on_event("startup")
+#@app.on_event("startup")
 async def _setup_query_engine():
     schema = app.state.database_schema
     sample_data = app.state.sample_data
@@ -268,7 +292,7 @@ async def _setup_query_engine():
     app.state.query_engine = query_engine
 
 
-@app.on_event("startup")
+#@app.on_event("startup")
 def _setup_tools_and_agent():
 
     evaluator = RelevancyEvaluator()
@@ -306,7 +330,7 @@ def _setup_tools_and_agent():
     app.state.agent = agent
 
 
-@app.on_event("startup")
+#@app.on_event("startup")
 def _setup_code_interpreter_agent():
     code_interpreter_tool = CustomAzureCodeInterpreterToolSpec(
         pool_management_endpoint=SESSIONS_ENDPOINT,
@@ -321,6 +345,23 @@ def _setup_code_interpreter_agent():
     )
 
 
+# used for straight up code inference and execution
+@app.post("/code_inference", response_model=CodeInferenceResponse, tags=["Inference"])
+async def code_inference(request: CodeInferenceRequest):
+    agent = app.state.code_interpreter_agent
+    try:
+        response = await agent.achat(request.code)
+        result = {
+            "answer": response.output,
+            "reasoning": response.reasoning  # Access the agent's thoughts here
+        }
+        return CodeInferenceResponse(response=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# use for baseball stats inference
 @app.post("/inference", response_model=InferenceResponse, tags=["Inference"])
 async def model_inference(request: InferenceRequest):
     agent = app.state.agent
@@ -338,19 +379,6 @@ async def model_inference(request: InferenceRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@app.post("/code_inference", response_model=CodeInferenceResponse, tags=["Inference"])
-async def code_inference(request: CodeInferenceRequest):
-    agent = app.state.code_interpreter_agent
-    try:
-        response = await agent.achat(request.code)
-        result = {
-            "answer": response.output,
-            "reasoning": response.reasoning  # Access the agent's thoughts here
-        }
-        return CodeInferenceResponse(response=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/list_models", tags=["Model Control"])
