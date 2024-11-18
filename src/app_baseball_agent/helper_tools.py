@@ -47,13 +47,21 @@ class AzureACASessionsSecureExecutor(AzureCodeInterpreterToolSpec):
         super().__init__(pool_management_endpoint, local_save_path)
         self.metadata = metadata
 
-    def run_code(self, python_code: str) -> dict:
-        """
+
+    def code_interpreter(self, python_code: str) -> dict:
+        code_run = super().code_interpreter(python_code)
+        code_run['files'] = self.list_files()
+        return code_run
+
+    # INFO: this uses the default prompt which is likely better
+    """ 
+    def code_interpreter(self, python_code: str) -> dict:
+        "
         Run arbitrary Python code and return the result along with the agent reasoning loop.
-        """
+        "
         result = super().code_interpreter(python_code)
         return result
-
+    """
 
 
 

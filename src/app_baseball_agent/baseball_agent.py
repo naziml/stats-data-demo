@@ -29,6 +29,7 @@ from llama_index.embeddings.ollama import OllamaEmbedding
 
 import logging
 logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 # use a .env file if we have it
 load_dotenv(dotenv_path='.env.dev')
@@ -95,7 +96,7 @@ async def _init():
     await asyncio.sleep(10)
     logging.critical("================= Starting initialization...")
     await _assemble_query_engine_seed()
-    await _prep_models()
+    await _prep_models() # & _setup_models(?)
     await _setup_query_engine()
     await _setup_tools_and_agent()
     await _setup_code_interpreter_agent()
@@ -106,37 +107,45 @@ async def _init():
 # retrieve the schema and sample data from the database
 #@app.on_event("startup")
 async def _assemble_query_engine_seed():
-    # Connect to the database
-    conn = await asyncpg.connect(DATABASE_ENDPOINT)
 
-    # Get the table names
-    table_names = await conn.fetch("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")
-    logging.info(f"table_names: {table_names}")
+    try:
+        # Connect to the database
+        conn = await asyncpg.connect(DATABASE_ENDPOINT)
 
-    # Get the column names for each table
-    database_schema = {}
-    sample_data = {}
-    for table in table_names:
-        table_name = table["table_name"]
-        logging.info(f"fetching schema for table_name: {table_name}")
-        database_schema[table_name] = {}
-        column_names = await conn.fetch(f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}'")
-        database_schema[table_name]["schema"] = [column["column_name"] for column in column_names]
-        table_description = await conn.fetch(f"SELECT obj_description(relfilenode, 'pg_class') AS table_comment FROM pg_class WHERE relname = '{table_name}' AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public');")
-        if table_description:
-            database_schema[table_name]["description"] = f"\033[95m {table_description[0]['table_comment']} \033[0m"
-        else:
-            database_schema[table_name]["description"] = "No description available"
-        sample_data[table_name] = await conn.fetch(str(text(f'SELECT * FROM "{table_name}" LIMIT 5')))
+        # Get the table names
+        table_names = await conn.fetch("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")
+        logging.info(f"table_names: {table_names}")
 
-    # Close the database connection
-    await conn.close()
-    logging.info(f"database_schema: {database_schema}")
-    logging.info(f"sample_data: {sample_data}")
+        # Get the column names for each table
+        database_schema = {}
+        sample_data = {}
+        for table in table_names:
+            table_name = table["table_name"]
+            logging.info(f"fetching schema for table_name: {table_name}")
+            database_schema[table_name] = {}
+            column_names = await conn.fetch(f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}'")
+            database_schema[table_name]["schema"] = [column["column_name"] for column in column_names]
+            table_description = await conn.fetch(f"SELECT obj_description(relfilenode, 'pg_class') AS table_comment FROM pg_class WHERE relname = '{table_name}' AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public');")
+            if table_description:
+                database_schema[table_name]["description"] = f"\033[95m {table_description[0]['table_comment']} \033[0m"
+            else:
+                database_schema[table_name]["description"] = "No description available"
+            sample_data[table_name] = await conn.fetch(str(text(f'SELECT * FROM "{table_name}" LIMIT 5')))
 
-    # Store the data in the application state
-    app.state.database_schema = database_schema
-    app.state.sample_data = sample_data
+        # Close the database connection
+        await conn.close()
+        logging.info(f"database_schema: {database_schema}")
+        logging.info(f"sample_data: {sample_data}")
+
+        # Store the data in the application state
+        app.state.database_schema = database_schema
+        app.state.sample_data = sample_data
+        return True
+    except Exception as e:
+        logging.error(f"Failed to assemble query engine seed: {e}")
+        return false
+
+
 
 
 # connect to ollama and see
@@ -157,6 +166,7 @@ async def _prep_models():
         "sqlcoder:15b"
     ]
     embedding_model = 'bge-large:latest'
+
     llm_model = None
     try:
         o = oclient(OLLAMA_ENDPOINT)
@@ -188,51 +198,58 @@ async def _prep_models():
         logging.error("Failure pulling or determining Ollama models: ", str(e))
         # fallback to openai
         _setup_models()
+    
+   
 
 
 # setup the embedding and llm models
 # use azure openai as stock in case we don't get anything different
 def _setup_models(llm_model="azure_openai", embedding_model="ada"):
 
-    logging.critical(f"\033[95m setting up llm model {llm_model} and embedding model {embedding_model} \033[0m")
-    llm = embed_model = None
-    if llm_model == "azure_openai":
-        # Initialize the AzureOpenAI model
-        llm = AzureOpenAI(
-            deployment_name=OPENAI_MODEL,
-            model=OPENAI_MODEL,
-            api_key=OPENAI_API_KEY,
-            azure_endpoint=OPENAI_ENDPOINT,
-            api_version=OPENAI_API_VERSION,
-        )
-        # Initialize the AzureOpenAIEmbedding model
-        embed_model = AzureOpenAIEmbedding(
-            model=EMBEDDING_MODEL,
-            deployment_name=EMBEDDING_MODEL,
-            api_key=OPENAI_API_KEY,
-            azure_endpoint=OPENAI_ENDPOINT,
-            api_version=EMBEDDING_API_VERSION,
-        )
-    else:
-        llm = Ollama(
-            model=llm_model,
-            request_timeout=600.0,
-            base_url=OLLAMA_ENDPOINT,
-            temperature=0.1,
-            keep_alive="180m"
-        )
-        embed_model = OllamaEmbedding(
-            model_name=embedding_model,
-            request_timeout=600.0,
-            base_url=OLLAMA_ENDPOINT,
-            temperature=0.1,
-            keep_alive="180m"
-        )
+    try:
+        logging.critical(f"\033[95m setting up llm model {llm_model} and embedding model {embedding_model} \033[0m")
+        llm = embed_model = None
+        if llm_model == "azure_openai":
+            # Initialize the AzureOpenAI model
+            llm = AzureOpenAI(
+                deployment_name=OPENAI_MODEL,
+                model=OPENAI_MODEL,
+                api_key=OPENAI_API_KEY,
+                azure_endpoint=OPENAI_ENDPOINT,
+                api_version=OPENAI_API_VERSION,
+            )
+            # Initialize the AzureOpenAIEmbedding model
+            embed_model = AzureOpenAIEmbedding(
+                model=EMBEDDING_MODEL,
+                deployment_name=EMBEDDING_MODEL,
+                api_key=OPENAI_API_KEY,
+                azure_endpoint=OPENAI_ENDPOINT,
+                api_version=EMBEDDING_API_VERSION,
+            )
+        else:
+            llm = Ollama(
+                model=llm_model,
+                request_timeout=600.0,
+                base_url=OLLAMA_ENDPOINT,
+                temperature=0.1,
+                keep_alive="180m"
+            )
+            embed_model = OllamaEmbedding(
+                model_name=embedding_model,
+                request_timeout=600.0,
+                base_url=OLLAMA_ENDPOINT,
+                temperature=0.1,
+                keep_alive="180m"
+            )
 
-    logging.critical(f"\033[95m {str(llm.complete('mic check 1 2 3, you there?'))} \033[0m")
-    logging.info("model setup complete")
-    Settings.llm = llm
-    Settings.embed_model = embed_model
+        logging.critical(f"\033[95m {str(llm.complete('mic check 1 2 3, you there?'))} \033[0m")
+        logging.info("model setup complete")
+        Settings.llm = llm
+        Settings.embed_model = embed_model
+        return True
+    except Exception as e:
+        logging.error(f"Failure setting up models: {str(e)}")
+        return False
 
 
 # check if we're using openai
@@ -255,83 +272,93 @@ async def check_connection(engine):
 # setup the query engine against our database
 #@app.on_event("startup")
 async def _setup_query_engine():
-    schema = app.state.database_schema
-    sample_data = app.state.sample_data
-    engine = create_engine(DATABASE_ENDPOINT)
-    db_status = await check_connection(engine)
-    logging.info(f"\033[95m {db_status} \033[0m")
-    sql_database = SQLDatabase(engine, include_tables=schema.keys())
+    try:
+        schema = app.state.database_schema
+        sample_data = app.state.sample_data
+        engine = create_engine(DATABASE_ENDPOINT)
+        db_status = await check_connection(engine)
+        logging.info(f"\033[95m {db_status} \033[0m")
+        sql_database = SQLDatabase(engine, include_tables=schema.keys())
 
-    # build out indexer compatible objects
-    table_node_mapping = SQLTableNodeMapping(sql_database)
-    
-    table_schema_objs = []
-    tables = schema.keys()
-    for table in tables:
-        logging.info(f"table: {table} with description: {schema[table]['description']}")
-        table_schema_objs.append((SQLTableSchema(table_name=table, context_str=schema[table]['description'])))
+        # build out indexer compatible objects
+        table_node_mapping = SQLTableNodeMapping(sql_database)
+        
+        table_schema_objs = []
+        tables = schema.keys()
+        for table in tables:
+            logging.info(f"table: {table} with description: {schema[table]['description']}")
+            table_schema_objs.append((SQLTableSchema(table_name=table, context_str=schema[table]['description'])))
 
-    # just use an in-memory index for now
-    obj_index = ObjectIndex.from_objects(
-        table_schema_objs,
-        table_node_mapping,
-        VectorStoreIndex,
-    )
+        # just use an in-memory index for now
+        obj_index = ObjectIndex.from_objects(
+            table_schema_objs,
+            table_node_mapping,
+            VectorStoreIndex,
+        )
 
-    query_engine = None
-    #if using_openai():
-        # Create the NLSQLTableQueryEngine
-    query_engine = NLSQLTableQueryEngine(
-        sql_database=sql_database,
-        tables=tables,
-        database_schema=schema,
-        sample_data=sample_data,
+        query_engine = None
+        #if using_openai():
+            # Create the NLSQLTableQueryEngine
+        query_engine = NLSQLTableQueryEngine(
+            sql_database=sql_database,
+            tables=tables,
+            database_schema=schema,
+            sample_data=sample_data,
 
-    )
-    logging.critical(f"\033[95m Query engine ready! \033[0m")
-    app.state.query_engine = query_engine
+        )
+        logging.critical(f"\033[95m Query engine ready! \033[0m")
+        app.state.query_engine = query_engine
+        return True
+    except Exception as e:
+        logging.error(f"Failed to set up query engine: {e}")
+        return False
 
 
 #@app.on_event("startup")
-def _setup_tools_and_agent():
+async def _setup_tools_and_agent():
 
-    evaluator = RelevancyEvaluator()
-    """
-    image_fetcher_metadata = ToolMetadata(
-        name="image-fetcher",
-        description=(
-            "Use this to fetch an image, write python code to fetch the image from https://www.baseball-reference.com/players/a/{PLAYERID}.shtml. Where PLAYERID is the playerid from the database. Download all the images which have /images/headshots/ as part of their directory location and save them in /data. The tool returns the result, stdout and stderr."
-        ),
-    )
-    """
+    try:
+        evaluator = RelevancyEvaluator()
+        """
+        image_fetcher_metadata = ToolMetadata(
+            name="image-fetcher",
+            description=(
+                "Use this to fetch an image, write python code to fetch the image from https://www.baseball-reference.com/players/a/{PLAYERID}.shtml. Where PLAYERID is the playerid from the database. Download all the images which have /images/headshots/ as part of their directory location and save them in /data. The tool returns the result, stdout and stderr."
+            ),
+        )
+        """
 
-    #image_fetcher = CustomAzureCodeInterpreterToolSpec(
-    #    pool_management_ID is the playerid from the database. Download all the images which have /images/headshots/ as part of their directory location and save them in /data. The tool returns the result, stdout and stderr."
+        #image_fetcher = CustomAzureCodeInterpreterToolSpec(
+        #    pool_management_ID is the playerid from the database. Download all the images which have /images/headshots/ as part of their directory location and save them in /data. The tool returns the result, stdout and stderr."
 
-    tools = [
-        EvalQueryEngineTool(
-            evaluator=evaluator,
-            query_engine=app.state.query_engine,
-            metadata=ToolMetadata(
-                name="historical-baseball-stats",
-                # prompt is defined in helper_functions
-                description=(
-                    baseball_tool_metadata_str
+        tools = [
+            EvalQueryEngineTool(
+                evaluator=evaluator,
+                query_engine=app.state.query_engine,
+                metadata=ToolMetadata(
+                    name="historical-baseball-stats",
+                    # prompt is defined in helper_functions
+                    description=(
+                        baseball_tool_metadata_str
+                    ),
                 ),
             ),
-        ),
-    ]
-    #tools.append(image_fetcher)
-    agent = None
-    if using_openai():
-        agent = OpenAIAgent.from_tools(tools, verbose=True)
-    else:
-        agent = ReActAgent.from_tools(tools=tools, verbose=True)
-    app.state.agent = agent
+        ]
+        #tools.append(image_fetcher)
+        agent = None
+        if using_openai():
+            agent = OpenAIAgent.from_tools(tools, verbose=True)
+        else:
+            agent = ReActAgent.from_tools(tools=tools, verbose=True)
+        app.state.agent = agent
+        return True
+    except Exception as e:
+        logging.error(f"Failed to set up tools and agent: {e}")
+        return False
 
 
 #@app.on_event("startup")
-def _setup_code_interpreter_agent():
+async def _setup_code_interpreter_agent():
     code_interpreter_tool = CustomAzureCodeInterpreterToolSpec(
         pool_management_endpoint=SESSIONS_ENDPOINT,
         metadata=ToolMetadata(
@@ -339,6 +366,7 @@ def _setup_code_interpreter_agent():
             description="Executes arbitrary Python code and returns the result."
         )
     )
+
     app.state.code_interpreter_agent = ReActAgent.from_tools(
         tools=[code_interpreter_tool],
         verbose=True
@@ -407,9 +435,12 @@ async def health_check():
     
     llm_model = embedding_model = "NA"
     # Get current LLM and embedding model
-    if not using_openai():
-        llm_model = Settings.llm.name
-        embedding_model = Settings.embed_model.name
+    if not using_openai() and Settings.llm and Settings.embed_model:
+        llm_model = Settings.llm.model
+        embedding_model = Settings.embed_model.model_name
+    elif not using_openai():
+        llm_model = "Failed to retrieve"
+        embedding_model = "Failed to retrieve"
     else:
         llm_model = OPENAI_MODEL
         embedding_model = EMBEDDING_MODEL
