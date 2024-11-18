@@ -21,5 +21,6 @@ COPY . .
 
 EXPOSE 8000
 
-# Set the entry point for the container
-CMD ["poetry", "run", "uvicorn", "baseball_agent:app", "--host", "0.0.0.0"]
+# using gunicorn
+# CMD ["poetry", "run", "uvicorn", "baseball_agent:app", "--host", "0.0.0.0"]
+CMD ["poetry", "run", "gunicorn", "-k", "uvicorn.workers.UvicornWorker", "baseball_agent:app", "--workers", "4", "--bind", "0.0.0.0"]

@@ -314,7 +314,7 @@ def _setup_tools_and_agent():
             query_engine=app.state.query_engine,
             metadata=ToolMetadata(
                 name="historical-baseball-stats",
-                #TODO: improve this prompt
+                # prompt is defined in helper_functions
                 description=(
                     baseball_tool_metadata_str
                 ),
@@ -346,8 +346,8 @@ def _setup_code_interpreter_agent():
 
 
 # used for straight up code inference and execution
-@app.post("/code_inference", response_model=CodeInferenceResponse, tags=["Inference"])
-async def code_inference(request: CodeInferenceRequest):
+@app.post("/python_code_inference", response_model=CodeInferenceResponse, tags=["Inference"])
+async def session_python_interpreter(request: CodeInferenceRequest):
     agent = app.state.code_interpreter_agent
     try:
         response = await agent.achat(request.code)
@@ -366,7 +366,6 @@ async def code_inference(request: CodeInferenceRequest):
 async def model_inference(request: InferenceRequest):
     agent = app.state.agent
     try:
-        # TODO: add inference time and model type to response
         start = time.time()
         response = await agent.achat(request.query)
         end = time.time()
@@ -385,7 +384,7 @@ async def model_inference(request: InferenceRequest):
 async def list_models():
     try:
         o = oclient(OLLAMA_ENDPOINT)
-        ollama_models = o.list()['models']
+        ollama_models = await o.list()['models']
         model_names = [m["name"] for m in ollama_models]
         return {"models": model_names}
     except Exception as e:
