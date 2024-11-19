@@ -18,6 +18,7 @@ import asyncpg
 from llama_index.core import SQLDatabase
 from helper_tools import *
 from llama_index.core.agent import ReActAgent
+import random
 
 from llama_index.core.indices.struct_store.sql_query import SQLTableRetrieverQueryEngine
 from llama_index.core.objects import SQLTableNodeMapping, ObjectIndex, SQLTableSchema
@@ -28,7 +29,7 @@ from llama_index.llms.ollama import Ollama
 from llama_index.embeddings.ollama import OllamaEmbedding
 
 import logging
-logging.basicConfig(level=logging.INFO)
+#logging.basicConfig(level=logging.INFO)
 logging.basicConfig(level=logging.DEBUG)
 
 # use a .env file if we have it
@@ -52,6 +53,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
 if not OPENAI_API_KEY:
     logging.warning("No OPENAI_API_KEY found!")
 
+
+DEFAULT_EMBEDD_MODEL = "bge-large:latest"
+DEFAULT_EMBEDD_MODEL = "nomic-embed-text:latest"
 
 # if we don't have a primary model we'll use azure openai
 LLM_MODEL_PRIMARY = os.getenv("LLM_MODEL_PRIMARY", "azure_openai")
@@ -86,14 +90,16 @@ app = FastAPI()
 # start the server first before we do anything else
 @app.on_event("startup")
 async def init():
-    logging.info("Initializing...")
+    logging.info("Scheduling initializing...")
     try:
         await asyncio.create_task(_init())
     except Exception as e:
         logging.error(f"Initialization failed: {e}")
 
 async def _init():
-    await asyncio.sleep(10)
+    wait_time = random.randint(5, 20)
+    logging.info(f"Waiting for {wait_time} seconds before starting initialization...")
+    await asyncio.sleep(wait_time)
     logging.critical("================= Starting initialization...")
     await _assemble_query_engine_seed()
     await _prep_models() # & _setup_models(?)
@@ -165,7 +171,7 @@ async def _prep_models():
         #"duckdb-nsql",
         "sqlcoder:15b"
     ]
-    embedding_model = 'bge-large:latest'
+    embedding_model = DEFAULT_EMBEDD_MODEL
 
     llm_model = None
     try:
@@ -229,14 +235,14 @@ def _setup_models(llm_model="azure_openai", embedding_model="ada"):
         else:
             llm = Ollama(
                 model=llm_model,
-                request_timeout=600.0,
+                request_timeout=720.0,
                 base_url=OLLAMA_ENDPOINT,
                 temperature=0.1,
                 keep_alive="180m"
             )
             embed_model = OllamaEmbedding(
                 model_name=embedding_model,
-                request_timeout=600.0,
+                request_timeout=120.0,
                 base_url=OLLAMA_ENDPOINT,
                 temperature=0.1,
                 keep_alive="180m"
@@ -408,7 +414,7 @@ async def model_inference(request: InferenceRequest):
 
 
 
-@app.get("/list_models", tags=["Model Control"])
+@app.get("/list_models", tags=["Agent Control"])
 async def list_models():
     try:
         o = oclient(OLLAMA_ENDPOINT)
@@ -419,13 +425,37 @@ async def list_models():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/set_model", tags=["Model Control"])
+@app.post("/set_model", tags=["Agent Control"])
 async def set_model(request: ModelRequest):
     try:
         _setup_models(llm_model=request.omodel_name, embedding_model="bge-large")
         return {"status": "model set successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/set_model", tags=["Agent Control"])
+async def set_model(request: ModelRequest):
+    try:
+        _setup_models(llm_model=request.omodel_name, embedding_model="bge-large")
+        return {"status": "model set successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rebuild_index", tags=["Agent Control"])
+async def rebuild_index():
+    try:
+        successful = await _assemble_query_engine_seed()
+        if not successful:
+            log.error("Failed to rebuild index")
+            raise Exception("Failed to rebuild index")
+        else:
+            await _setup_query_engine()
+        return {"status": "Reindexing started successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.get("/health", tags=["Health"])
