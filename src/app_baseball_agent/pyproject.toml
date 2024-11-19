@@ -19,6 +19,10 @@ python-dotenv = "^1.0.1"
 llama-index-tools-azure-code-interpreter = "^0.3.0"
 az-cli = "^0.5"
 ollama = "^0.3.3"
+llama-index-llms-ollama = "^0.3.6"
+llama-index-core = "^0.11.23"
+llama-index-embeddings-ollama = "^0.3.1"
+gunicorn = "^23.0.0"
 
 
 [build-system]
