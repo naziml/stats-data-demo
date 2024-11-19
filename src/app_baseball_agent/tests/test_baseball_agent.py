@@ -1,18 +1,10 @@
 import pytest
-import logging
-from app_baseball_agent import list_models
+from httpx import AsyncClient
+from baseball_agent import app
 
-logging.basicConfig(level=logging.INFO)
-
-@pytest.fixture
-def setup():
-    # Setup code if needed
-    pass
-
-def test_list_models(setup):
-    try:
-        result = await list_models()  # Ensure the function is awaited
-        assert isinstance(result, list)  # Check if the result is a list
-    except Exception as e:
-        logging.error(f"Error occurred: {e}")
-        assert False, "list_models raised an exception"
+@pytest.mark.asyncio
+async def test_list_models():
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        response = await ac.get("/list_models")
+    assert response.status_code == 200
+    assert "models" in response.json()
